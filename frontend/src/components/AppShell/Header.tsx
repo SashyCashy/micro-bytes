@@ -2,10 +2,12 @@ import {
   ActionIcon,
   AppShell,
   Group,
+  UnstyledButton,
   useComputedColorScheme,
   useMantineColorScheme,
 } from '@mantine/core';
 import { IconMoon, IconSun } from '@tabler/icons-react';
+import { Link } from 'react-router';
 
 export default function Header() {
   const { setColorScheme } = useMantineColorScheme();
@@ -19,7 +21,14 @@ export default function Header() {
   return (
     <AppShell.Header>
       <Group h="100%" px="md" justify="space-between" align="end">
-        <Group>
+        {/* Home is the app's reset: `/` carries no search params, so this
+            clears the query, type, country, sort and page in one click. */}
+        <UnstyledButton
+          component={Link}
+          to="/"
+          aria-label="Micro Bytes home — clear search"
+          style={{ display: 'flex', alignItems: 'center' }}
+        >
           {/* Picked from the resolved scheme rather than a `prefers-color-scheme`
               source, or the logo would ignore a manual toggle. */}
           <img
@@ -27,7 +36,7 @@ export default function Header() {
             alt="Micro Bytes"
             height="40"
           />
-        </Group>
+        </UnstyledButton>
         <ActionIcon
           variant="default"
           size="lg"
