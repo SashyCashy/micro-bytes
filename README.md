@@ -31,6 +31,12 @@ npm install
 npm run dev              # http://localhost:5173, proxies /api to :5002
 ```
 
+## Documentation
+
+- [docs/architecture.md](docs/architecture.md) — how the pieces fit and why there is a backend
+- [docs/decisions.md](docs/decisions.md) — design decisions and what each one costs
+- [docs/api.md](docs/api.md) — endpoint reference
+
 ## Notes
 
 Open Food Facts serves two versions of the Nutri-Score algorithm: the search
