@@ -1,5 +1,6 @@
 import { fetchJson } from './http';
 import type {
+  AssistResponse,
   Product,
   ProductSummary,
   Recipe,
@@ -17,15 +18,15 @@ export async function searchRecipes(
     page_number: String(page_number),
   });
 
-  return fetchJson<SearchResponse<RecipeSummary>>(`/api/search/recipe?${params}`, {
-    signal,
-  });
+  return fetchJson<SearchResponse<RecipeSummary>>(
+    `/api/search/recipe?${params}`,
+    {
+      signal,
+    },
+  );
 }
 
-export async function getRecipeDetails(
-  recipeId: string,
-  signal?: AbortSignal,
-) {
+export async function getRecipeDetails(recipeId: string, signal?: AbortSignal) {
   return fetchJson<Recipe>(`/api/recipes/${recipeId}`, { signal });
 }
 
@@ -66,6 +67,15 @@ export async function getProductDetails(
 
 export async function getCountries(signal?: AbortSignal) {
   return fetchJson<{ value: string; label: string }[]>('/api/countries', {
+    signal,
+  });
+}
+
+export async function assist(query: string, signal?: AbortSignal) {
+  return fetchJson<AssistResponse>('/api/assist', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query }),
     signal,
   });
 }

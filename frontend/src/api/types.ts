@@ -41,3 +41,14 @@ export type Recipe = RecipeSummary & {
   tags?: string[];
   ingredients?: Ingredient[];
 };
+
+/** One assistant result: the normal record plus which route it links to. */
+export type AssistItem = ProductSummary & {
+  kind: 'product' | 'recipe';
+};
+
+export type AssistResponse = {
+  /** The assistant's own sentence about what it searched and found. */
+  answer: string;
+  results: AssistItem[];
+};

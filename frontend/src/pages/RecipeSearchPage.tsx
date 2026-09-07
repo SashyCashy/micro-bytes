@@ -1,12 +1,18 @@
-import { Group, Select, SegmentedControl, Stack } from '@mantine/core';
+import { Alert, Group, Select, SegmentedControl, Stack } from '@mantine/core';
+import { IconSparkles } from '@tabler/icons-react';
 import SearchBar from '../components/Searchbar';
 import Pagination from '../components/Pagination';
 import SearchResults, { type SearchItem } from '../components/SearchResults';
 import { useEffect, useState } from 'react';
 import { useDebouncedValue } from '@mantine/hooks';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router';
-import { getCountries, searchProducts, searchRecipes } from '../api/recipes';
+import {
+  assist,
+  getCountries,
+  searchProducts,
+  searchRecipes,
+} from '../api/recipes';
 
 const PAGE_SIZE = 9;
 
@@ -73,11 +79,24 @@ export default function RecipeSearchPage() {
   const [query, setQuery] = useState(urlQuery);
   const [debouncedQuery] = useDebouncedValue(query, 400);
 
+  const assistant = useMutation({ mutationFn: (q: string) => assist(q) });
+
   // Keep the input in sync when the URL changes underneath us (back/forward,
   // or returning from a details page).
   useEffect(() => {
     setQuery(urlQuery);
   }, [urlQuery]);
+
+  // An assistant answer describes the query that produced it, so it is dropped
+  // the moment the query moves on — including via the clear button and the
+  // header logo, which both empty the query. It deliberately lives outside the
+  // URL: the answer is not reproducible from search params, so it does not
+  // survive a reload, unlike keyword search.
+  const assistReset = assistant.reset;
+
+  useEffect(() => {
+    assistReset();
+  }, [query, assistReset]);
 
   useEffect(() => {
     if (debouncedQuery === urlQuery) return;
@@ -166,6 +185,15 @@ export default function RecipeSearchPage() {
         ? ALL_COUNTRIES
         : country;
 
+  const assistResults = assistant.data?.results;
+  const isAssisting = assistant.isPending;
+  // The assistant answers across both types, so each result carries its own
+  // route rather than taking the page's current search type.
+  const getAssistItemUrl = (item: SearchItem) =>
+    (item as { kind?: string }).kind === 'recipe'
+      ? `/recipes/${item.id}`
+      : `/products/${item.id}`;
+
   const totalResults = data?.total ?? 0;
   const totalPages = Math.ceil(totalResults / PAGE_SIZE);
   const isSearchActive = urlQuery.trim().length >= 2;
@@ -177,6 +205,8 @@ export default function RecipeSearchPage() {
         query={query}
         onQueryChange={setQuery}
         compact={isSearchActive}
+        onAssist={(value) => assistant.mutate(value)}
+        assistPending={isAssisting}
       />
       {isSearchActive && (
         <SegmentedControl
@@ -214,22 +244,48 @@ export default function RecipeSearchPage() {
           />
         </Group>
       )}
-      <SearchResults
-        items={data?.products ?? []}
-        heading={heading}
-        getItemUrl={getItemUrl}
-        isLoading={isLoading}
-        isError={isError}
-        error={error}
-        hasSearched={hasSearched}
-        query={urlQuery}
-        kind={searchType}
-      />
-      <Pagination
+      {(isAssisting || assistResults || assistant.isError) && (
+        <Alert
+          icon={<IconSparkles size={18} />}
+          color="brand"
+          variant="light"
+          title={isAssisting ? 'Searching…' : 'AI search'}
+        >
+          {assistant.isError
+            ? (assistant.error as Error).message
+            : isAssisting
+              ? 'Reading the results and picking the ones that fit.'
+              : assistant.data?.answer}
+        </Alert>
+      )}
+      {assistResults || isAssisting ? (
+        <SearchResults
+          items={assistResults ?? []}
+          heading="AI results"
+          getItemUrl={getAssistItemUrl}
+          isLoading={isAssisting}
+          hasSearched
+          query={urlQuery}
+          kind={searchType}
+        />
+      ) : (
+        <SearchResults
+          items={data?.products ?? []}
+          heading={heading}
+          getItemUrl={getItemUrl}
+          isLoading={isLoading}
+          isError={isError}
+          error={error}
+          hasSearched={hasSearched}
+          query={urlQuery}
+          kind={searchType}
+        />
+      )}
+      {!assistResults && !isAssisting && <Pagination
         currentPage={currentPage}
         totalPages={totalPages}
         onPageChange={setCurrentPage}
-      />
+      />}
     </Stack>
   );
 }

@@ -1,10 +1,24 @@
 import { useRef } from 'react';
-import { Center, Image, Text, TextInput, CloseButton } from '@mantine/core';
+import {
+  ActionIcon,
+  Center,
+  CloseButton,
+  Group,
+  Image,
+  Text,
+  TextInput,
+  Tooltip,
+} from '@mantine/core';
+import { IconSparkles } from '@tabler/icons-react';
 
 type SearchBarProps = {
   query: string;
   onQueryChange: (value: string) => void;
   compact?: boolean;
+  /** Runs the natural-language search. Explicit by design: it costs a request
+   *  per call, so it never rides the debounce that keyword search uses. */
+  onAssist?: (query: string) => void;
+  assistPending?: boolean;
 };
 
 // Height of the bar alone, used as the collapsed target for the shell. It has
@@ -16,6 +30,8 @@ export default function SearchBar({
   query,
   onQueryChange,
   compact = false,
+  onAssist,
+  assistPending = false,
 }: SearchBarProps) {
   // Everything below stays mounted across the compact toggle: React keeps the
   // same DOM nodes, so the CSS transitions actually have a previous value to
@@ -29,6 +45,12 @@ export default function SearchBar({
   const clearQuery = () => {
     onQueryChange('');
     inputRef.current?.focus();
+  };
+
+  const canAssist = Boolean(onAssist) && query.trim().length >= 2;
+
+  const runAssist = () => {
+    if (canAssist) onAssist!(query.trim());
   };
 
   return (
@@ -72,18 +94,40 @@ export default function SearchBar({
               event.preventDefault();
               clearQuery();
             }
+            // Enter asks the assistant. Keyword search needs no submit — it
+            // already runs off the debounce as you type.
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              runAssist();
+            }
           }}
           // Mantine sets pointer-events: none on section wrappers so they do
           // not block clicks into the field; without this the button renders
           // but cannot be clicked.
           rightSectionPointerEvents="all"
+          rightSectionWidth={query ? 88 : 0}
           rightSection={
             query ? (
-              <CloseButton
-                size="lg"
-                aria-label="Clear search"
-                onClick={clearQuery}
-              />
+              <Group gap={2} wrap="nowrap" pr={4}>
+                <Tooltip label="Ask about this (Enter)" openDelay={400}>
+                  <ActionIcon
+                    variant="subtle"
+                    color="brand"
+                    size="lg"
+                    aria-label="Search with AI"
+                    loading={assistPending}
+                    disabled={!canAssist}
+                    onClick={runAssist}
+                  >
+                    <IconSparkles size={20} />
+                  </ActionIcon>
+                </Tooltip>
+                <CloseButton
+                  size="lg"
+                  aria-label="Clear search"
+                  onClick={clearQuery}
+                />
+              </Group>
             ) : null
           }
           value={query}
