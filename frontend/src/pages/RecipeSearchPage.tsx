@@ -3,7 +3,7 @@ import { IconSparkles } from '@tabler/icons-react';
 import SearchBar from '../components/Searchbar';
 import Pagination from '../components/Pagination';
 import SearchResults, { type SearchItem } from '../components/SearchResults';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useDebouncedValue } from '@mantine/hooks';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router';
@@ -123,6 +123,9 @@ export default function RecipeSearchPage() {
       },
       { replace: true },
     );
+
+    // Asking again for a query that already failed is a deliberate retry.
+    askedFor.current.delete(value);
     assistant.mutate(value);
   };
 
@@ -142,6 +145,25 @@ export default function RecipeSearchPage() {
   useEffect(() => {
     assistReset();
   }, [query, assistReset]);
+
+  // Queries already sent, so a failure is not retried forever and a repeat is
+  // not paid for twice. A ref rather than state: this must not itself cause a
+  // render, or the effect below would loop.
+  const askedFor = useRef(new Set<string>());
+  const assistMutate = assistant.mutate;
+
+  // While the AI tab is open, editing the query re-asks on its own. The query
+  // reaching this effect is already debounced by 400ms via the URL, and each
+  // distinct query is asked once and then served from cache — so pausing mid
+  // word does not pay for the half-typed version twice.
+  useEffect(() => {
+    if (!showAssist || urlQuery.trim().length < 2) return;
+    if (queryClient.getQueryData(['assist', urlQuery])) return;
+    if (askedFor.current.has(urlQuery)) return;
+
+    askedFor.current.add(urlQuery);
+    assistMutate(urlQuery);
+  }, [showAssist, urlQuery, queryClient, assistMutate]);
 
   useEffect(() => {
     if (debouncedQuery === urlQuery) return;
@@ -226,11 +248,6 @@ export default function RecipeSearchPage() {
     if (value === 'assist') {
       next.set('ai', '1');
       setSearchParams(next);
-      // Nothing cached for this query yet, so ask now rather than showing an
-      // empty AI tab.
-      if (!queryClient.getQueryData(['assist', urlQuery])) {
-        assistant.mutate(urlQuery);
-      }
       return;
     }
 
