@@ -1,11 +1,10 @@
-"""Natural-language search: the model drives the same upstream calls the API
-already makes, then filters on fields the search index cannot express.
+"""Natural-language search: the model reads the request, Python does the work.
 
-Open Food Facts' index is a Lucene keyword match, so a constraint like "under
-200 calories" is unanswerable by search alone. Every product the API returns
-already carries per-100g nutriments, so the model searches, reads the results,
-and picks the ones that fit. It can only filter within what it fetched, which
-is why the prompt insists the answer says so.
+The model is used for the one thing it is reliably good at — turning "low
+sugar breakfast cereal" into keywords plus a numeric threshold — and for
+nothing else. Filtering and ranking are ordinary Python, because asking the
+model to also pick the results made the same question return two, three or
+four products on consecutive runs.
 """
 
 import json
@@ -13,130 +12,109 @@ import os
 
 MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
-# Each round is one model call. Enough for a search, an optional second search
-# with different terms, and the answer; a runaway loop stops rather than
-# billing indefinitely.
-MAX_ROUNDS = 5
+# Fields a filter may name, mapped onto the nutrition keys the API returns.
+NUTRIENTS = ("calories", "protein", "fat", "carbs", "sugars", "salt")
 
-SYSTEM_PROMPT = """You are the search assistant for Micro Bytes, a food and \
-recipe search app.
+COMPARISONS = {
+    "lt": lambda value, limit: value < limit,
+    "lte": lambda value, limit: value <= limit,
+    "gt": lambda value, limit: value > limit,
+    "gte": lambda value, limit: value >= limit,
+}
 
-Turn the user's request into searches, then pick the results that genuinely \
-fit. Work in this order:
+SYSTEM_PROMPT = """You read a food search request and describe how to answer \
+it. You do not choose the results — code does that from your description.
 
-1. Call search_products (packaged food, carries per-100g nutrition) or \
-search_recipes (dish ideas, no nutrition data) with plain keywords. Strip \
-constraints out of the search terms: search "protein bar", not "high protein \
-bar under 200 calories" — the upstream index matches keywords only and \
-constraint words make it match nothing.
-   Leave sort at relevance unless the user is explicitly asking for the \
-healthiest or worst options. Sorting by nutrition reorders every match in the \
-database by grade, which pulls in food that barely relates to the search: a \
-nutrition-sorted "breakfast cereal" search returns lentil pasta.
-2. Read what comes back and apply the user's constraints yourself, against the \
-nutrition values in the results.
-3. Call present_results with the ids that fit, best first, and a one or two \
-sentence answer.
+Return a plan through the `plan_search` tool. Every request gets exactly one \
+plan.
 
-Rules that matter:
+Search terms: keywords only. "protein bar", never "high protein bar under 200 \
+calories" — the upstream index matches keywords, so constraint words make it \
+match nothing.
 
-- Every nutrition value is per 100g, never per serving. A shopper asking for "under 200 calories" is usually thinking of a serving, and almost no packaged snack is under 200 kcal per 100g. Apply the limit per 100g, and say which basis you used.
-- Prefer showing something over showing nothing. If a numeric limit leaves nothing, present the closest few anyway and label them plainly as the nearest matches with their actual values — an empty grid tells the user nothing. Only return an empty list when the search itself found nothing relevant.
-- Quote counts from the tool result, never from memory: sample_size is how many you saw, and the number of ids you pass is how many you are showing. Do not write a count you have not computed.
-- Keep the answer internally consistent. If you say results fit, pass their ids; if none fit, say none fit and pass the nearest matches instead. Never both in one sentence.
-- You only ever see a sample of the matches, not everything. Say so: "the top 24 matches" is honest, "everything that fits" is not.
-- Never invent a product, an id, or a nutrition value. Only pass ids a search actually returned.
-- A nutriScore of "unknown" or "not-applicable" means the grade is missing, not bad. Say the data is missing rather than treating it as a low grade.
-"""
+Filters: turn every nutritional constraint into a numeric threshold. All \
+values are per 100g.
 
-TOOL_SCHEMAS = [
+A number the user gives always wins, exactly as they said it. "less than 5g \
+of salt" is salt lt 5, never a stricter figure you think is more sensible — \
+the answer quotes their words back, so a different threshold makes it a lie.
+
+Only when they give no number does vague wording become one:
+  low sugar: sugars lt 5        high sugar: sugars gte 15
+  low salt: salt lt 0.3         high salt: salt gte 1.5
+  high protein: protein gte 15  low fat: fat lt 3
+  low calorie: calories lt 150  high fibre is not available
+A shopper saying "under 200 calories" is thinking of a serving, but the data \
+is per 100g — pass their number through anyway and code will explain the \
+basis.
+
+Sort: leave at relevance unless the user explicitly wants the healthiest or \
+worst options. Sorting by nutrition reorders every match in the database by \
+grade, which drags in food that barely relates to the search.
+
+Kind: "recipe" only when the user clearly wants something to cook. Recipes \
+carry no nutrition data, so a request with any nutritional constraint is a \
+product search.
+
+Interpretation: one noun phrase naming what is being looked for, in the \
+user's own terms — "breakfast cereals with under 5g of sugar". No greeting, \
+no count, no promise about results; you cannot see them."""
+
+PLAN_TOOL = [
     {
         "type": "function",
         "function": {
-            "name": "search_products",
-            "description": (
-                "Search packaged food products. Results carry per-100g "
-                "nutrition (calories, protein, fat, carbs, sugars, salt) and a "
-                "Nutri-Score grade. Use plain keywords only."
-            ),
+            "name": "plan_search",
+            "description": "Describe how to answer the request.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "query": {
+                    "kind": {"type": "string", "enum": ["product", "recipe"]},
+                    "search_terms": {
                         "type": "string",
                         "description": "Keywords only, no constraints.",
                     },
                     "sort": {
                         "type": "string",
                         "enum": ["relevance", "nutrition", "nutrition_desc"],
-                        "description": (
-                            "'nutrition' ranks best Nutri-Score first, "
-                            "'nutrition_desc' worst first."
-                        ),
                     },
                     "country": {
                         "type": "string",
                         "description": (
-                            "Open Food Facts country tag such as "
-                            "'en:india'. Omit for the default, or pass 'all' "
-                            "to search every country."
+                            "Open Food Facts country tag such as 'en:india', "
+                            "or 'all' to search everywhere. Omit for the "
+                            "default."
                         ),
                     },
-                },
-                "required": ["query"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "search_recipes",
-            "description": (
-                "Search recipes by dish name. Recipes carry no nutrition data, "
-                "so nutritional constraints cannot be applied to them."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string", "description": "Dish keywords."}
-                },
-                "required": ["query"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "present_results",
-            "description": (
-                "Show the chosen results to the user. Ends the turn — call it "
-                "exactly once, including when nothing fits."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "answer": {
-                        "type": "string",
-                        "description": (
-                            "One or two sentences: what was searched, how many "
-                            "of the sample fit, and any caveat."
-                        ),
-                    },
-                    "ids": {
+                    "filters": {
                         "type": "array",
-                        "items": {"type": "string"},
-                        "description": "Ids from search results, best first.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "field": {
+                                    "type": "string",
+                                    "enum": list(NUTRIENTS),
+                                },
+                                "op": {
+                                    "type": "string",
+                                    "enum": list(COMPARISONS),
+                                },
+                                "value": {"type": "number"},
+                            },
+                            "required": ["field", "op", "value"],
+                        },
                     },
+                    "interpretation": {"type": "string"},
                 },
-                "required": ["answer", "ids"],
+                "required": ["kind", "search_terms", "interpretation"],
             },
         },
-    },
+    }
 ]
 
 
 class AssistantError(RuntimeError):
-    """Raised when the assistant cannot produce an answer."""
+    """Raised when the assistant cannot produce a plan."""
 
 
 def is_configured():
@@ -144,65 +122,133 @@ def is_configured():
     return bool(os.getenv("OPENAI_API_KEY"))
 
 
-def _client():
-    # Imported lazily so the rest of the API keeps working when the optional
-    # dependency is absent or the key is unset.
+def plan(query):
+    """Ask the model how to answer `query`. One call, one tool, no loop."""
     from openai import OpenAI
 
-    return OpenAI()
+    response = OpenAI().chat.completions.create(
+        model=MODEL,
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": query},
+        ],
+        tools=PLAN_TOOL,
+        # The plan is the only acceptable reply, and the same question must
+        # always produce the same one.
+        tool_choice={"type": "function", "function": {"name": "plan_search"}},
+        temperature=0,
+    )
+
+    calls = response.choices[0].message.tool_calls
+
+    if not calls:
+        raise AssistantError("The assistant could not read that request.")
+
+    try:
+        raw = json.loads(calls[0].function.arguments or "{}")
+    except json.JSONDecodeError as error:
+        raise AssistantError("The assistant returned an unreadable plan.") from error
+
+    return {
+        "kind": "recipe" if raw.get("kind") == "recipe" else "product",
+        "search_terms": (raw.get("search_terms") or query).strip(),
+        "sort": raw.get("sort") if raw.get("sort") in ("nutrition", "nutrition_desc") else None,
+        "country": raw.get("country"),
+        "filters": _clean_filters(raw.get("filters")),
+        "interpretation": (raw.get("interpretation") or query).strip(),
+    }
 
 
-def run(query, handlers):
-    """Drive the tool loop until the model presents results.
+def _clean_filters(filters):
+    """Drop anything the model invented that we cannot evaluate."""
+    if not isinstance(filters, list):
+        return []
 
-    `handlers` maps a tool name to a callable taking the model's arguments and
-    returning JSON-serialisable results.
+    cleaned = []
+
+    for entry in filters:
+        if not isinstance(entry, dict):
+            continue
+
+        field, op, value = entry.get("field"), entry.get("op"), entry.get("value")
+
+        if field in NUTRIENTS and op in COMPARISONS and isinstance(value, (int, float)):
+            cleaned.append({"field": field, "op": op, "value": float(value)})
+
+    return cleaned
+
+
+def _satisfies(item, spec):
+    """Whether one item passes one filter. Missing data never passes."""
+    value = (item.get("nutrition") or {}).get(spec["field"])
+
+    if not isinstance(value, (int, float)):
+        return None
+
+    return COMPARISONS[spec["op"]](value, spec["value"])
+
+
+def _distance(item, spec):
+    """How far an item is from a threshold, for ordering the near misses."""
+    value = (item.get("nutrition") or {}).get(spec["field"])
+
+    if not isinstance(value, (int, float)):
+        # Unknown values sort last: we cannot claim they are close.
+        return float("inf")
+
+    return abs(value - spec["value"])
+
+
+def rank(items, filters, limit):
+    """Matches first, then the nearest misses. Deterministic for a given input.
+
+    Returning only exact matches is what made result counts jump around; a
+    near miss shown as a near miss is more useful than an empty grid.
     """
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": query},
-    ]
-    client = _client()
+    if not filters:
+        return items[:limit], len(items[:limit])
 
-    for _ in range(MAX_ROUNDS):
-        response = client.chat.completions.create(
-            model=MODEL,
-            messages=messages,
-            tools=TOOL_SCHEMAS, # type: ignore
+    matched, missed, unknown = [], [], []
+
+    for item in items:
+        verdicts = [_satisfies(item, spec) for spec in filters]
+
+        if any(verdict is None for verdict in verdicts):
+            unknown.append(item)
+        elif all(verdicts):
+            matched.append(item)
+        else:
+            missed.append(item)
+
+    primary = filters[0]
+    matched.sort(key=lambda item: _distance(item, primary))
+    missed.sort(key=lambda item: _distance(item, primary))
+
+    return (matched + missed + unknown)[:limit], len(matched)
+
+
+def describe(plan_, shown, fitting, sample_size):
+    """The sentence above the results. Composed here so the counts are real."""
+    subject = plan_["interpretation"]
+
+    if not shown:
+        return f"No matches for {subject} in the top {sample_size} results."
+
+    if not plan_["filters"]:
+        return f"Showing {shown} of the top {sample_size} matches for {subject}."
+
+    basis = " Values are per 100g, not per serving."
+
+    if fitting == 0:
+        return (
+            f"None of the top {sample_size} matches fit {subject}, so these are "
+            f"the {shown} closest.{basis}"
         )
-        message = response.choices[0].message
-        messages.append(message.model_dump(exclude_none=True))
 
-        if not message.tool_calls:
-            # Answered without presenting anything — usually a clarifying
-            # question. Pass the text through with no results.
-            return {"answer": message.content or "", "ids": []}
+    if fitting < shown:
+        return (
+            f"{fitting} of these {shown} fit {subject}; the rest are the "
+            f"closest misses.{basis}"
+        )
 
-        for call in message.tool_calls:
-            name = call.function.name
-
-            try:
-                arguments = json.loads(call.function.arguments or "{}")
-            except json.JSONDecodeError:
-                arguments = {}
-
-            if name == "present_results":
-                return {
-                    "answer": arguments.get("answer", ""),
-                    "ids": [str(i) for i in arguments.get("ids", [])],
-                }
-
-            handler = handlers.get(name)
-            result = (
-                handler(**arguments)
-                if handler
-                else {"error": f"unknown tool: {name}"}
-            )
-
-            messages.append({
-                "role": "tool",
-                "tool_call_id": call.id,
-                "content": json.dumps(result),
-            })
-
-    raise AssistantError("The assistant kept searching without answering.")
+    return f"All {shown} of these fit {subject}.{basis}"

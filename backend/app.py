@@ -262,25 +262,9 @@ ASSIST_SAMPLE_SIZE = 24
 ASSIST_MAX_RESULTS = 9
 
 
-def compact_for_model(item):
-    """Only the fields the model reasons over.
-
-    Images and URLs are dead weight in a prompt, and the full record would
-    triple the token cost of every search round.
-    """
-    return {
-        "id": item["id"],
-        "title": item["title"],
-        "brand": item.get("brand"),
-        "quantity": item.get("quantity"),
-        "nutriScore": item.get("nutriScore"),
-        "nutrition": item.get("nutrition"),
-    }
-
-
 @app.route("/api/assist", methods=["POST"])
 def assist():
-    """Natural-language search: the model searches, then filters the results."""
+    """Natural-language search: the model plans, this route executes."""
     payload = request.get_json(silent=True) or {}
     query = (payload.get("query") or "").strip()
 
@@ -293,79 +277,54 @@ def assist():
             "reason": "assistant_unconfigured",
         }), 503
 
-    # Everything the model was shown, so ids it picks resolve back to the full
-    # records the frontend renders. It never sees an id it was not given.
-    seen = {}
-
-    def search_products_tool(query, sort=None, country=None):
-        country_tag = DEFAULT_COUNTRY if country is None else country
-        # "all" is the model's way of clearing the filter; the client treats an
-        # unknown tag as no filter, so an empty string is the right handoff.
-        if country_tag == "all":
-            country_tag = ""
-
-        data = search_products(
-            query=query,
-            page=1,
-            page_size=ASSIST_SAMPLE_SIZE,
-            country=country_tag,
-            sort=sort if sort in SORT_FIELDS else None,
-        )
-        items = [format_product(product) for product in data.get("hits", [])]
-
-        for item in items:
-            seen[item["id"]] = {"kind": "product", "item": item}
-
-        return {
-            "sample_size": len(items),
-            "total_matches": min(data.get("count", 0), MAX_RESULTS),
-            "results": [compact_for_model(item) for item in items],
-        }
-
-    def search_recipes_tool(query):
-        meals = search_meals(query)[:ASSIST_SAMPLE_SIZE]
-        items = [format_meal_summary(meal) for meal in meals]
-
-        for item in items:
-            seen[item["id"]] = {"kind": "recipe", "item": item}
-
-        return {
-            "sample_size": len(items),
-            "total_matches": len(items),
-            "results": [
-                {"id": item["id"], "title": item["title"]} for item in items
-            ],
-        }
-
     try:
-        result = assistant.run(
-            query,
-            {
-                "search_products": search_products_tool,
-                "search_recipes": search_recipes_tool,
-            },
-        )
-    except requests.RequestException as error:
-        return upstream_error("Search", error)
+        plan = assistant.plan(query)
     except assistant.AssistantError as error:
-        app.logger.warning("Assistant gave up: %s", error)
         return jsonify({"error": str(error)}), 502
     except Exception as error:
-        # The provider SDK raises its own exception types; the message can
+        # The provider SDK raises its own exception types, and the message can
         # carry the request URL, so only the type is logged.
         app.logger.warning("Assistant failed: %s", type(error).__name__)
         return jsonify({"error": "AI search is unavailable right now"}), 502
 
-    # Ids are filtered through `seen` rather than trusted: a hallucinated id
-    # is dropped instead of 404ing the frontend.
-    chosen = [seen[item_id] for item_id in result["ids"] if item_id in seen]
+    try:
+        if plan["kind"] == "recipe":
+            meals = search_meals(plan["search_terms"])[:ASSIST_SAMPLE_SIZE]
+            items = [format_meal_summary(meal) for meal in meals]
+            # Recipes carry no nutrition, so there is nothing to filter on.
+            shown, fitting = items[:ASSIST_MAX_RESULTS], len(items[:ASSIST_MAX_RESULTS])
+            plan["filters"] = []
+        else:
+            country = plan["country"]
+            country_tag = DEFAULT_COUNTRY if country is None else country
+            # "all" is the plan's way of clearing the filter; the client treats
+            # an unknown tag as no filter, so an empty string is the handoff.
+            if country_tag == "all":
+                country_tag = ""
+
+            data = search_products(
+                query=plan["search_terms"],
+                page=1,
+                page_size=ASSIST_SAMPLE_SIZE,
+                country=country_tag,
+                sort=plan["sort"],
+            )
+            items = [format_product(product) for product in data.get("hits", [])]
+            shown, fitting = assistant.rank(
+                items, plan["filters"], ASSIST_MAX_RESULTS
+            )
+    except requests.RequestException as error:
+        return upstream_error("Search", error)
 
     return json_response({
-        "answer": result["answer"],
-        "results": [
-            {**entry["item"], "kind": entry["kind"]}
-            for entry in chosen[:ASSIST_MAX_RESULTS]
-        ],
+        "answer": assistant.describe(plan, len(shown), fitting, len(items)),
+        "results": [{**item, "kind": plan["kind"]} for item in shown],
+        # Surfaced so the UI can show what the request was understood to mean.
+        "plan": {
+            "kind": plan["kind"],
+            "searchTerms": plan["search_terms"],
+            "filters": plan["filters"],
+        },
     })
 
 

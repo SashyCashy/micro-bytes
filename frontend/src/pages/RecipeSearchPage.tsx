@@ -86,6 +86,9 @@ export default function RecipeSearchPage() {
   // outlives this component — the page unmounts on the way to a details page,
   // so mutation state alone would lose the answer on every card click.
   const assistKey = ['assist', urlQuery];
+  // Which view is showing. In the URL so a details-page round trip comes back
+  // to the same one, and so the tabs have something real to switch between.
+  const showAssist = searchParams.get('ai') === '1';
 
   const { data: assistData } = useQuery<AssistResponse>({
     queryKey: assistKey,
@@ -114,6 +117,7 @@ export default function RecipeSearchPage() {
       (previous) => {
         const next = new URLSearchParams(previous);
         next.set('q', value);
+        next.set('ai', '1');
         next.delete('page');
         return next;
       },
@@ -161,9 +165,22 @@ export default function RecipeSearchPage() {
   // answer sits on top of — so touching one has to mean "back to browsing",
   // or the control looks broken. Removing the cache entry is what dismisses
   // the answer; the mutation reset only clears a pending or failed call.
+  // Leaves the AI view without discarding the answer: switching back to it
+  // should not re-run a request that has already been paid for.
+  const setShowAssist = (value: boolean) => {
+    const next = new URLSearchParams(searchParams);
+    if (value) {
+      next.set('ai', '1');
+    } else {
+      next.delete('ai');
+    }
+    setSearchParams(next, { replace: true });
+  };
+
   const dismissAssist = () => {
     queryClient.removeQueries({ queryKey: ['assist', urlQuery] });
     assistant.reset();
+    setShowAssist(false);
   };
 
   const setCurrentPage = (page: number) => {
@@ -177,8 +194,10 @@ export default function RecipeSearchPage() {
   };
 
   const setSort = (value: string) => {
-    dismissAssist();
     const next = new URLSearchParams(searchParams);
+    // Filters belong to keyword search, so using one leaves the AI view —
+    // but the answer is kept, and the AI tab returns to it.
+    next.delete('ai');
     if (value) {
       next.set('sort', value);
     } else {
@@ -190,8 +209,10 @@ export default function RecipeSearchPage() {
   };
 
   const setCountry = (value: string) => {
-    dismissAssist();
     const next = new URLSearchParams(searchParams);
+    // Filters belong to keyword search, so using one leaves the AI view —
+    // but the answer is kept, and the AI tab returns to it.
+    next.delete('ai');
     // Always written, even empty, to distinguish "cleared" from "untouched".
     next.set('country', value);
     // A different country changes which results land on which page.
@@ -200,8 +221,21 @@ export default function RecipeSearchPage() {
   };
 
   const setSearchType = (value: string) => {
-    dismissAssist();
     const next = new URLSearchParams(searchParams);
+
+    if (value === 'assist') {
+      next.set('ai', '1');
+      setSearchParams(next);
+      // Nothing cached for this query yet, so ask now rather than showing an
+      // empty AI tab.
+      if (!queryClient.getQueryData(['assist', urlQuery])) {
+        assistant.mutate(urlQuery);
+      }
+      return;
+    }
+
+    next.delete('ai');
+
     if (value === 'recipe') {
       next.delete('type');
     } else {
@@ -238,8 +272,11 @@ export default function RecipeSearchPage() {
         ? ALL_COUNTRIES
         : country;
 
-  const assistResults = assistData?.results;
-  const isAssisting = assistant.isPending;
+  // Held for the AI tab even while a keyword view is showing, so switching
+  // back is instant and free.
+  const hasAssistAnswer = Boolean(assistData);
+  const assistResults = showAssist ? assistData?.results : undefined;
+  const isAssisting = assistant.isPending && showAssist;
   // The assistant answers across both types, so each result carries its own
   // route rather than taking the page's current search type.
   const getAssistItemUrl = (item: SearchItem) =>
@@ -260,15 +297,16 @@ export default function RecipeSearchPage() {
         compact={isSearchActive}
         onAssist={runAssist}
         assistPending={isAssisting}
-        assistActive={Boolean(assistResults)}
+        assistActive={showAssist && hasAssistAnswer}
       />
       {isSearchActive && (
         <SegmentedControl
-          value={searchType}
+          value={showAssist ? 'assist' : searchType}
           onChange={setSearchType}
           data={[
             { label: 'Products', value: 'product' },
             { label: 'Recipes', value: 'recipe' },
+            { label: '✨ AI', value: 'assist' },
           ]}
           w="fit-content"
           mx="auto"
