@@ -87,6 +87,10 @@ kind. Ask only when there is no food word anywhere in the message.
 being looked for and stops there — no counts, no claims about what was found, \
 no recommendations.
 
+search_terms is required for every request that is not a clarification. Do \
+not leave it out because the phrasing was conversational — "can you list \
+chicken recipes" is a search for "chicken".
+
 Interpretation: one noun phrase naming what is being looked for, in the \
 user's own terms — "breakfast cereals with under 5g of sugar". No greeting, \
 no count, no promise about results; you cannot see them."""
@@ -158,8 +162,46 @@ FILLER_WORDS = frozenset("""
 a an the and or of for with without some any my me i im id is are am be
 hi hello hey please thanks thank you show find get give looking look want
 need search suggest recommend something anything eat eating food foods
-buy something's what which where how can could would should do does
-""".split()) | set(DIETS) | {"gluten", "free", "vegetarianism"}
+buy what which where how can could would should do does tell list give
+recipe recipes dish dishes meal meals idea ideas option options
+kind kinds type types sort variety best top good great nice
+today tonight tomorrow now please me us
+""".split()) | set(DIETS) | {"gluten", "free"}
+
+
+# Phrases that name a diet, longest first so "gluten free" is matched before
+# "free". Detected here rather than left to the model: it drops the diet field
+# whenever the prompt is reordered, and a missed diet silently returns food the
+# user cannot eat.
+DIET_PHRASES = (
+    ("palm oil free", "palm-oil-free"),
+    ("no palm oil", "palm-oil-free"),
+    ("gluten free", "gluten-free"),
+    ("gluten-free", "gluten-free"),
+    ("glutenfree", "gluten-free"),
+    ("vegetarian", "vegetarian"),
+    ("veggie", "vegetarian"),
+    ("vegan", "vegan"),
+    ("organic", "organic"),
+)
+
+
+def detect_diet(text):
+    """The diet named in `text`, and `text` with that phrase removed.
+
+    The phrase has to come out of the search terms: the index matches it
+    against product names, so "vegan snacks" finds snacks with "vegan" in the
+    title rather than snacks labelled vegan.
+    """
+    lowered = f" {text.lower()} "
+    found = None
+
+    for phrase, diet in DIET_PHRASES:
+        if f" {phrase} " in lowered:
+            found = found or diet
+            lowered = lowered.replace(f" {phrase} ", " ")
+
+    return found, " ".join(lowered.split())
 
 
 def _subject_words(query):
@@ -212,6 +254,15 @@ def plan(query):
 
     search_terms = (raw.get("search_terms") or "").strip()
 
+    # The model sets `diet` only when the prompt happens to be worded the way
+    # it likes, so the query is checked directly and the model's answer is
+    # only a fallback.
+    detected_diet, without_diet = detect_diet(search_terms)
+    query_diet, _ = detect_diet(query)
+
+    if detected_diet:
+        search_terms = without_diet
+
     # The model is unreliable about when to ask: it will answer "vegan snacks"
     # one call and ask which kind the next. So the decision is made here — if
     # the message contains a food word, that word is the search, and any
@@ -233,7 +284,9 @@ def plan(query):
 
     return {
         "clarification": clarification,
-        "diet": raw.get("diet") if raw.get("diet") in DIETS else None,
+        "diet": detected_diet
+        or query_diet
+        or (raw.get("diet") if raw.get("diet") in DIETS else None),
         "kind": "recipe" if raw.get("kind") == "recipe" else "product",
         "search_terms": search_terms,
         "sort": raw.get("sort") if raw.get("sort") in ("nutrition", "nutrition_desc") else None,
