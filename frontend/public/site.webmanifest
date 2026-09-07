@@ -1,0 +1,16 @@
+{
+  "name": "Micro Bytes",
+  "short_name": "Micro Bytes",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#111827",
+  "icons": [
+    {
+      "src": "/images/microbytes-app-icon-light.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

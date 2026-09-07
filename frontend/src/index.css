@@ -1,0 +1,100 @@
+.brand-name {
+  font-family: Inter, Arial, sans-serif;
+  font-size: 2.5rem;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 0;
+  margin: -2.5rem 0 0;
+  -webkit-font-smoothing: antialiased;
+}
+
+.brand-name-micro {
+  color: var(--mantine-color-text);
+  font-weight: bold;
+}
+
+.brand-name-bytes {
+  color: #ff6a00;
+  margin-left: 0.4rem;
+  font-weight: bold;
+}
+
+.brand-tagline {
+  color: var(--mantine-color-dimmed);
+  font-family: Inter, Arial, sans-serif;
+  font-size: 0.75rem;
+  font-weight: 400;
+  letter-spacing: 0.18em;
+  line-height: 1;
+  margin: 0.5rem 0 0;
+  text-align: center;
+  -webkit-font-smoothing: antialiased;
+}
+
+.search-input {
+  margin-top: 1rem;
+  transition: width 350ms ease;
+}
+
+/* The shell owns the vertical position: the bar is always centred inside it,
+   so shrinking its height from 75vh to the bar's own height is what slides the
+   bar up to the top. Both ends are real lengths, so it interpolates. */
+.searchbar-shell {
+  transition: min-height 350ms ease;
+}
+
+/* Wrapping row rather than a column/row swap: the logo block claims a full
+   line in hero mode and 56px in compact, which pulls the input up beside it
+   without ever changing flex-direction (that would jump). */
+.searchbar-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: flex-end;
+  gap: 0.75rem;
+  width: 100%;
+}
+
+.searchbar-logo {
+  display: flex;
+  flex: 0 0 100%;
+  flex-direction: column;
+  align-items: center;
+  transition: flex-basis 350ms ease;
+}
+
+.searchbar-logo.is-compact {
+  flex-basis: 56px;
+}
+
+.searchbar-mark {
+  transition:
+    width 350ms ease,
+    height 350ms ease;
+}
+
+/* Collapsed by height rather than unmounted, so the wordmark and tagline
+   leave as part of the same motion instead of popping out. */
+.searchbar-brand {
+  max-height: 8rem;
+  opacity: 1;
+  overflow: hidden;
+  transition:
+    max-height 350ms ease,
+    opacity 200ms ease;
+}
+
+.searchbar-logo.is-compact .searchbar-brand {
+  max-height: 0;
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .searchbar-shell,
+  .searchbar-logo,
+  .searchbar-mark,
+  .searchbar-brand,
+  .search-input {
+    transition: none;
+  }
+}

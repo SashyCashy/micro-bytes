@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="food" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FFAA18"/>
+      <stop offset="1" stop-color="#F02E35"/>
+    </linearGradient>
+    <linearGradient id="leaf" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#78C82A"/>
+      <stop offset="1" stop-color="#2E8B3A"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="#111827"/>
+  <path d="M130 105 C82 105 58 145 72 190 L112 322 C123 359 151 383 186 383 H204 L256 302 L308 383 H326 C361 383 389 359 400 322 L440 190 C454 145 430 105 382 105 C346 105 316 124 291 153 L256 194 L221 153 C196 124 166 105 130 105Z" fill="url(#food)"/>
+  <path d="M256 194 L204 383 H308Z" fill="#B91C3B" opacity=".55"/>
+  <path d="M177 160 V292 C177 310 189 323 207 323 V184 M151 160 V218 M177 160 V218 M203 160 V218"
+        fill="none" stroke="#FFFFFF" stroke-width="22" stroke-linecap="round"/>
+  <circle cx="321" cy="247" r="72" fill="#FFFFFF"/>
+  <circle cx="321" cy="247" r="47" fill="none" stroke="#FF6A00" stroke-width="15"/>
+  <path d="M352 283 L388 319" fill="none" stroke="#FFFFFF" stroke-width="25" stroke-linecap="round"/>
+  <path d="M255 112 C244 74 259 42 294 25 C306 59 292 91 255 112Z" fill="url(#leaf)"/>
+  <path d="M270 108 C290 68 333 54 373 62 C354 101 319 117 270 108Z" fill="url(#leaf)"/>
+</svg>
