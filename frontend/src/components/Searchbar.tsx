@@ -1,4 +1,5 @@
-import { Center, Image, Text, TextInput } from '@mantine/core';
+import { useRef } from 'react';
+import { Center, Image, Text, TextInput, CloseButton } from '@mantine/core';
 
 type SearchBarProps = {
   query: string;
@@ -19,6 +20,17 @@ export default function SearchBar({
   // Everything below stays mounted across the compact toggle: React keeps the
   // same DOM nodes, so the CSS transitions actually have a previous value to
   // animate from (and the input keeps focus and caret position).
+
+  // The button lives inside the input, so clicking it moves focus out of the
+  // field. Handing focus back keeps the next keystroke going where the user
+  // expects — they cleared the box to type something else.
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const clearQuery = () => {
+    onQueryChange('');
+    inputRef.current?.focus();
+  };
+
   return (
     <Center className="searchbar-shell" mih={compact ? COMPACT_HEIGHT : '75vh'}>
       <div className="searchbar-row">
@@ -40,6 +52,7 @@ export default function SearchBar({
           </div>
         </div>
         <TextInput
+          ref={inputRef}
           className="search-input"
           size="xl"
           placeholder="Search recipes or products..."
@@ -51,6 +64,27 @@ export default function SearchBar({
               h={24}
               fit="contain"
             />
+          }
+          // Escape is the keyboard equivalent, and is what people reach for
+          // before they look for a button.
+          onKeyDown={(event) => {
+            if (event.key === 'Escape' && query) {
+              event.preventDefault();
+              clearQuery();
+            }
+          }}
+          // Mantine sets pointer-events: none on section wrappers so they do
+          // not block clicks into the field; without this the button renders
+          // but cannot be clicked.
+          rightSectionPointerEvents="all"
+          rightSection={
+            query ? (
+              <CloseButton
+                size="lg"
+                aria-label="Clear search"
+                onClick={clearQuery}
+              />
+            ) : null
           }
           value={query}
           onChange={(e) => onQueryChange(e.currentTarget.value)}
