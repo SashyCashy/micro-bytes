@@ -37,6 +37,19 @@ npm run dev              # http://localhost:5173, proxies /api to :5002
 - [docs/decisions.md](docs/decisions.md) — design decisions and what each one costs
 - [docs/api.md](docs/api.md) — endpoint reference
 
+## Deploy to Render
+
+`render.yaml` provisions both services: Dashboard → New → Blueprint → pick this
+repo. It creates a Docker web service for the API and a static site for the
+frontend, with rewrites standing in for the nginx `/api` proxy and `try_files`,
+and locks the API's CORS to the static site's origin.
+
+If the API service is named anything other than `micro-bytes-api`, update the
+rewrite destination in `render.yaml` to match its URL.
+
+On the free plan services spin down after 15 minutes idle, so the first request
+after a pause takes around a minute.
+
 ## Notes
 
 Open Food Facts serves two versions of the Nutri-Score algorithm: the search

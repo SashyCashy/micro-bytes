@@ -12,7 +12,25 @@ from openfoodfacts import (
 from openfoodfacts.client import COUNTRIES, DEFAULT_COUNTRY, MAX_RESULTS, SORT_FIELDS
 
 app = Flask(__name__)
-CORS(app)
+
+# Comma-separated origins, or "*" for any. Local runs and compose want any
+# origin; a deployed API should name its own frontend, since without this the
+# public API is callable from any page on the web.
+CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*").strip()
+
+if CORS_ORIGINS == "*":
+    CORS(app)
+else:
+    # A host set by the platform arrives without a scheme, so add the one it
+    # would be served over rather than silently failing to match.
+    CORS(
+        app,
+        origins=[
+            origin if "://" in origin else f"https://{origin}"
+            for origin in (o.strip() for o in CORS_ORIGINS.split(",") if o.strip())
+        ],
+    )
+
 app.config["JSONIFY_PRETTYPRINT_REGULAR"] = True
 RECIPE_PAGE_SIZE = 9
 PRODUCT_PAGE_SIZE = 9

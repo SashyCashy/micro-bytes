@@ -1,0 +1,40 @@
+# Render blueprint: provisions both services from this repo.
+# Dashboard → New → Blueprint → pick this repo.
+services:
+  - type: web
+    name: micro-bytes-api
+    runtime: docker
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    plan: free
+    # Render assigns $PORT; the Dockerfile binds it.
+    healthCheckPath: /api/countries
+    envVars:
+      # Locks the public API to the static site's own origin. Render fills in
+      # the host once the site below exists, so it never has to be pasted by
+      # hand or updated when the URL changes.
+      - key: CORS_ORIGINS
+        fromService:
+          type: web
+          name: micro-bytes
+          property: host
+
+  - type: web
+    name: micro-bytes
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    # Order matters: the API rule has to be matched before the catch-all, or
+    # every /api call would be answered with index.html.
+    routes:
+      # Replaces the nginx /api proxy block, which relies on a compose network
+      # that does not exist here.
+      - type: rewrite
+        source: /api/*
+        destination: https://micro-bytes-api.onrender.com/api/:splat
+      # Replaces nginx try_files: client routes like /products/<code> have no
+      # file behind them and would 404 on refresh.
+      - type: rewrite
+        source: /*
+        destination: /index.html
