@@ -42,7 +42,7 @@ export default function SearchBar({
         <TextInput
           className="search-input"
           size="xl"
-          placeholder="Search recipes..."
+          placeholder="Search recipes or products..."
           leftSection={
             <Image
               src="/images/microbytes-search-icon-dark.svg"
