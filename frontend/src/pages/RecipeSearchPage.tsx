@@ -157,6 +157,15 @@ export default function RecipeSearchPage() {
     );
   }, [debouncedQuery, urlQuery, setSearchParams]);
 
+  // The type tabs and the filters drive keyword search, which the assistant's
+  // answer sits on top of — so touching one has to mean "back to browsing",
+  // or the control looks broken. Removing the cache entry is what dismisses
+  // the answer; the mutation reset only clears a pending or failed call.
+  const dismissAssist = () => {
+    queryClient.removeQueries({ queryKey: ['assist', urlQuery] });
+    assistant.reset();
+  };
+
   const setCurrentPage = (page: number) => {
     const next = new URLSearchParams(searchParams);
     if (page > 1) {
@@ -168,6 +177,7 @@ export default function RecipeSearchPage() {
   };
 
   const setSort = (value: string) => {
+    dismissAssist();
     const next = new URLSearchParams(searchParams);
     if (value) {
       next.set('sort', value);
@@ -180,6 +190,7 @@ export default function RecipeSearchPage() {
   };
 
   const setCountry = (value: string) => {
+    dismissAssist();
     const next = new URLSearchParams(searchParams);
     // Always written, even empty, to distinguish "cleared" from "untouched".
     next.set('country', value);
@@ -189,6 +200,7 @@ export default function RecipeSearchPage() {
   };
 
   const setSearchType = (value: string) => {
+    dismissAssist();
     const next = new URLSearchParams(searchParams);
     if (value === 'recipe') {
       next.delete('type');
@@ -291,6 +303,9 @@ export default function RecipeSearchPage() {
           color="brand"
           variant="light"
           title={isAssisting ? 'Searching…' : 'AI search'}
+          withCloseButton={!isAssisting}
+          closeButtonLabel="Dismiss AI results"
+          onClose={dismissAssist}
         >
           {assistant.isError
             ? (assistant.error as Error).message
