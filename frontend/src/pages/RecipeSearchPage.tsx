@@ -5,8 +5,9 @@ import Pagination from '../components/Pagination';
 import SearchResults, { type SearchItem } from '../components/SearchResults';
 import { useEffect, useState } from 'react';
 import { useDebouncedValue } from '@mantine/hooks';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router';
+import type { AssistResponse } from '../api/types';
 import {
   assist,
   getCountries,
@@ -79,7 +80,47 @@ export default function RecipeSearchPage() {
   const [query, setQuery] = useState(urlQuery);
   const [debouncedQuery] = useDebouncedValue(query, 400);
 
-  const assistant = useMutation({ mutationFn: (q: string) => assist(q) });
+  const queryClient = useQueryClient();
+
+  // Keyed by the query it answered and parked in the React Query cache, which
+  // outlives this component — the page unmounts on the way to a details page,
+  // so mutation state alone would lose the answer on every card click.
+  const assistKey = ['assist', urlQuery];
+
+  const { data: assistData } = useQuery<AssistResponse>({
+    queryKey: assistKey,
+    // Never fetched by this observer; it exists to read the cache and to hold
+    // the entry alive while the search page is mounted.
+    queryFn: () => Promise.reject(new Error('unreachable')),
+    enabled: false,
+    staleTime: Infinity,
+    // Long enough to read a product and come back. Past this the answer is
+    // gone and the keyword grid returns, which is the honest fallback.
+    gcTime: 1000 * 60 * 30,
+  });
+
+  const assistant = useMutation({
+    mutationFn: (q: string) => assist(q),
+    onSuccess: (data, submitted) =>
+      queryClient.setQueryData(['assist', submitted], data),
+  });
+
+  // The answer is stored under the query it answered, so the URL has to carry
+  // that query before the request lands — otherwise the entry is written under
+  // a key the page is not reading yet, and the result appears 400ms late when
+  // the debounce catches up.
+  const runAssist = (value: string) => {
+    setSearchParams(
+      (previous) => {
+        const next = new URLSearchParams(previous);
+        next.set('q', value);
+        next.delete('page');
+        return next;
+      },
+      { replace: true },
+    );
+    assistant.mutate(value);
+  };
 
   // Keep the input in sync when the URL changes underneath us (back/forward,
   // or returning from a details page).
@@ -185,7 +226,7 @@ export default function RecipeSearchPage() {
         ? ALL_COUNTRIES
         : country;
 
-  const assistResults = assistant.data?.results;
+  const assistResults = assistData?.results;
   const isAssisting = assistant.isPending;
   // The assistant answers across both types, so each result carries its own
   // route rather than taking the page's current search type.
@@ -205,7 +246,7 @@ export default function RecipeSearchPage() {
         query={query}
         onQueryChange={setQuery}
         compact={isSearchActive}
-        onAssist={(value) => assistant.mutate(value)}
+        onAssist={runAssist}
         assistPending={isAssisting}
       />
       {isSearchActive && (
@@ -255,7 +296,7 @@ export default function RecipeSearchPage() {
             ? (assistant.error as Error).message
             : isAssisting
               ? 'Reading the results and picking the ones that fit.'
-              : assistant.data?.answer}
+              : assistData?.answer}
         </Alert>
       )}
       {assistResults || isAssisting ? (
