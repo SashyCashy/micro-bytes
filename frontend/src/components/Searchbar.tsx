@@ -49,8 +49,14 @@ export default function SearchBar({
 
   const canAssist = Boolean(onAssist) && query.trim().length >= 2;
 
+  // Always actionable rather than disabled when empty: a dead button teaches
+  // nothing, so it puts the cursor where the question goes instead.
   const runAssist = () => {
-    if (canAssist) onAssist!(query.trim());
+    if (canAssist) {
+      onAssist!(query.trim());
+    } else {
+      inputRef.current?.focus();
+    }
   };
 
   return (
@@ -105,30 +111,39 @@ export default function SearchBar({
           // not block clicks into the field; without this the button renders
           // but cannot be clicked.
           rightSectionPointerEvents="all"
-          rightSectionWidth={query ? 88 : 0}
+          // Held constant so the field does not resize as the clear button
+          // comes and goes.
+          rightSectionWidth={88}
           rightSection={
-            query ? (
-              <Group gap={2} wrap="nowrap" pr={4}>
-                <Tooltip label="Ask about this (Enter)" openDelay={400}>
-                  <ActionIcon
-                    variant="subtle"
-                    color="brand"
-                    size="lg"
-                    aria-label="Search with AI"
-                    loading={assistPending}
-                    disabled={!canAssist}
-                    onClick={runAssist}
-                  >
-                    <IconSparkles size={20} />
-                  </ActionIcon>
-                </Tooltip>
+            <Group gap={2} wrap="nowrap" pr={4} justify="flex-end" w="100%">
+              <Tooltip
+                label={
+                  canAssist
+                    ? 'Ask AI about this (Enter)'
+                    : 'Type a question, then ask AI'
+                }
+                openDelay={300}
+              >
+                <ActionIcon
+                  className={assistPending ? undefined : 'assist-star'}
+                  variant="subtle"
+                  color="brand"
+                  size="lg"
+                  aria-label="Search with AI"
+                  loading={assistPending}
+                  onClick={runAssist}
+                >
+                  <IconSparkles size={20} />
+                </ActionIcon>
+              </Tooltip>
+              {query ? (
                 <CloseButton
                   size="lg"
                   aria-label="Clear search"
                   onClick={clearQuery}
                 />
-              </Group>
-            ) : null
+              ) : null}
+            </Group>
           }
           value={query}
           onChange={(e) => onQueryChange(e.currentTarget.value)}

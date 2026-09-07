@@ -89,6 +89,31 @@
   opacity: 0;
 }
 
+/* A slow twinkle, not a pulse: the button sits in the field the whole time the
+   user is typing, so anything faster reads as an alert rather than an offer.
+   Paused on hover and focus, where the tooltip is doing the explaining. */
+.assist-star {
+  animation: assist-twinkle 3.2s ease-in-out infinite;
+}
+
+.assist-star:hover,
+.assist-star:focus-visible {
+  animation-play-state: paused;
+}
+
+@keyframes assist-twinkle {
+  0%,
+  60%,
+  100% {
+    opacity: 0.7;
+    transform: scale(1) rotate(0deg);
+  }
+  30% {
+    opacity: 1;
+    transform: scale(1.15) rotate(12deg);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .searchbar-shell,
   .searchbar-logo,
@@ -96,5 +121,10 @@
   .searchbar-brand,
   .search-input {
     transition: none;
+  }
+
+  .assist-star {
+    animation: none;
+    opacity: 1;
   }
 }
