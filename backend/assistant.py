@@ -15,6 +15,9 @@ MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 # Fields a filter may name, mapped onto the nutrition keys the API returns.
 NUTRIENTS = ("calories", "protein", "fat", "carbs", "sugars", "salt")
 
+# Kept in step with DIET_LABELS in the Open Food Facts client.
+DIETS = ("vegetarian", "vegan", "gluten-free", "organic", "palm-oil-free")
+
 COMPARISONS = {
     "lt": lambda value, limit: value < limit,
     "lte": lambda value, limit: value <= limit,
@@ -52,9 +55,37 @@ Sort: leave at relevance unless the user explicitly wants the healthiest or \
 worst options. Sorting by nutrition reorders every match in the database by \
 grade, which drags in food that barely relates to the search.
 
+Diet: set it when the user names one, including in passing ("I'm vegan"). It \
+filters on the label the producer declared, so never put words like vegan or \
+gluten-free in the search terms — those only match product names.
+
 Kind: "recipe" only when the user clearly wants something to cook. Recipes \
 carry no nutrition data, so a request with any nutritional constraint is a \
 product search.
+
+Clarification: when the message names no food to search for, set \
+`clarification` to one short question asking what they are looking for, and \
+leave everything else out. "I am vegetarian" states a preference but no \
+subject — ask what they want to eat rather than inventing one.
+
+What you must never do:
+
+- Never invent a food. Every word in search_terms has to come from the user's \
+message or be an obvious synonym of it. "I am vegetarian" does not imply \
+protein bars, snacks, or anything else.
+- Never invent a threshold. A filter exists only if the user asked for one, \
+either with a number or with wording like "low sugar". No constraint in the \
+message means no filters at all.
+- Never guess at what they probably meant when the message is too thin to act \
+on. Asking costs one sentence; guessing wrong wastes the whole answer.
+
+But a food category is a subject, not a thin message. If the message contains \
+any food word at all — "cereal", "snacks", "chicken", "pasta" — search for it. \
+Breadth is not a reason to ask: "cereal" means search cereal, not ask which \
+kind. Ask only when there is no food word anywhere in the message.
+- Never describe results. You cannot see any. The interpretation names what is \
+being looked for and stops there — no counts, no claims about what was found, \
+no recommendations.
 
 Interpretation: one noun phrase naming what is being looked for, in the \
 user's own terms — "breakfast cereals with under 5g of sugar". No greeting, \
@@ -104,13 +135,41 @@ PLAN_TOOL = [
                             "required": ["field", "op", "value"],
                         },
                     },
+                    "diet": {"type": "string", "enum": list(DIETS)},
                     "interpretation": {"type": "string"},
+                    "clarification": {
+                        "type": "string",
+                        "description": (
+                            "Set instead of a search when the message names "
+                            "no food to look for."
+                        ),
+                    },
                 },
-                "required": ["kind", "search_terms", "interpretation"],
+                "required": [],
             },
         },
     }
 ]
+
+
+# Words that carry no search subject on their own. Anything left after these
+# are removed is a food word as far as we are concerned.
+FILLER_WORDS = frozenset("""
+a an the and or of for with without some any my me i im id is are am be
+hi hello hey please thanks thank you show find get give looking look want
+need search suggest recommend something anything eat eating food foods
+buy something's what which where how can could would should do does
+""".split()) | set(DIETS) | {"gluten", "free", "vegetarianism"}
+
+
+def _subject_words(query):
+    """The query's food words, if any — filler and diet names removed."""
+    cleaned = "".join(
+        character if character.isalnum() or character.isspace() else " "
+        for character in query.lower()
+    )
+
+    return [word for word in cleaned.split() if word not in FILLER_WORDS]
 
 
 class AssistantError(RuntimeError):
@@ -149,13 +208,41 @@ def plan(query):
     except json.JSONDecodeError as error:
         raise AssistantError("The assistant returned an unreadable plan.") from error
 
+    clarification = (raw.get("clarification") or "").strip()
+
+    search_terms = (raw.get("search_terms") or "").strip()
+
+    # The model is unreliable about when to ask: it will answer "vegan snacks"
+    # one call and ask which kind the next. So the decision is made here — if
+    # the message contains a food word, that word is the search, and any
+    # clarification the model wanted to ask is dropped.
+    subject = _subject_words(query)
+
+    if not search_terms and subject:
+        search_terms = " ".join(subject)
+
+    # Asking is a last resort, never an alternative to answering: the model
+    # routinely returns a usable plan *and* a follow-up question, and showing
+    # results beats asking which kind of cereal they meant.
+    if search_terms:
+        clarification = ""
+
+    # Nothing to search for and nothing to go on: asking beats inventing.
+    if not search_terms and not clarification:
+        clarification = "What food are you looking for?"
+
     return {
+        "clarification": clarification,
+        "diet": raw.get("diet") if raw.get("diet") in DIETS else None,
         "kind": "recipe" if raw.get("kind") == "recipe" else "product",
-        "search_terms": (raw.get("search_terms") or query).strip(),
+        "search_terms": search_terms,
         "sort": raw.get("sort") if raw.get("sort") in ("nutrition", "nutrition_desc") else None,
         "country": raw.get("country"),
         "filters": _clean_filters(raw.get("filters")),
-        "interpretation": (raw.get("interpretation") or query).strip(),
+        # Falls back to the search terms rather than the raw message: echoing
+        # "I am vegetarian, show me protein bars" back as the subject of a
+        # sentence reads as a parroted prompt, not an interpretation.
+        "interpretation": (raw.get("interpretation") or search_terms or query).strip(),
     }
 
 
@@ -231,8 +318,14 @@ def describe(plan_, shown, fitting, sample_size):
     """The sentence above the results. Composed here so the counts are real."""
     subject = plan_["interpretation"]
 
+    # The interpretation usually says it already; repeating it reads as noise.
+    if plan_["diet"] and plan_["diet"] not in subject.lower():
+        subject = f"{subject} labelled {plan_['diet']}"
+
     if not shown:
-        return f"No matches for {subject} in the top {sample_size} results."
+        # Distinguishes "the search found nothing" from "nothing in the sample
+        # fit", which are different problems for the user.
+        return f"No matches for {subject}."
 
     if not plan_["filters"]:
         return f"Showing {shown} of the top {sample_size} matches for {subject}."

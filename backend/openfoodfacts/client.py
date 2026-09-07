@@ -80,8 +80,23 @@ UNSAFE_QUERY_CHARS = re.compile(r'[+\-!(){}\[\]^"~*?:\\/]|&&|\|\|')
 LUCENE_KEYWORDS = {"AND", "OR", "NOT"}
 
 
-def build_query(query, country=DEFAULT_COUNTRY):
-    """Free text plus an optional country filter clause.
+# Diet labels the index can filter on directly. Matching these against the
+# product name instead — which is what passing "vegan" as a keyword does — only
+# finds products with the word in their title.
+# Tag names are the index's own, not the obvious English: "en:gluten-free" and
+# "en:palm-oil-free" both exist as spellings and both match nothing. Verify a
+# tag against the index before adding one here.
+DIET_LABELS = {
+    "vegetarian": "en:vegetarian",
+    "vegan": "en:vegan",
+    "gluten-free": "en:no-gluten",
+    "organic": "en:organic",
+    "palm-oil-free": "en:no-palm-oil",
+}
+
+
+def build_query(query, country=DEFAULT_COUNTRY, diet=None):
+    """Free text plus optional country and diet filter clauses.
 
     User input is stripped of Lucene operators rather than quoted, because a
     quoted term is treated as a phrase against the default field and matches
@@ -96,13 +111,27 @@ def build_query(query, country=DEFAULT_COUNTRY):
     if country in COUNTRIES:
         parts.append(f'countries_tags:"{country}"')
 
+    if diet in DIET_LABELS:
+        parts.append(f'labels_tags:"{DIET_LABELS[diet]}"')
+
     return " ".join(parts)
 
 
-def search_products(query, page=1, page_size=10, country=DEFAULT_COUNTRY, sort=None):
-    """`sort` is a key of SORT_FIELDS; anything else falls back to relevance."""
+def search_products(
+    query,
+    page=1,
+    page_size=10,
+    country=DEFAULT_COUNTRY,
+    sort=None,
+    diet=None,
+):
+    """`sort` is a key of SORT_FIELDS; anything else falls back to relevance.
+
+    `diet` is a key of DIET_LABELS and filters on the label the producer
+    declared, not on the product name.
+    """
     params = {
-        "q": build_query(query, country),
+        "q": build_query(query, country, diet),
         "page": page,
         "page_size": page_size,
         "fields": SEARCH_FIELDS,

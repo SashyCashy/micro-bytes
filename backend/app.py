@@ -287,6 +287,15 @@ def assist():
         app.logger.warning("Assistant failed: %s", type(error).__name__)
         return jsonify({"error": "AI search is unavailable right now"}), 502
 
+    # A preference with no subject ("I am vegetarian") is not a search: asking
+    # what they want beats inventing a product to search for.
+    if plan["clarification"]:
+        return json_response({
+            "answer": plan["clarification"],
+            "results": [],
+            "plan": {"kind": plan["kind"], "searchTerms": "", "filters": []},
+        })
+
     try:
         if plan["kind"] == "recipe":
             meals = search_meals(plan["search_terms"])[:ASSIST_SAMPLE_SIZE]
@@ -308,6 +317,7 @@ def assist():
                 page_size=ASSIST_SAMPLE_SIZE,
                 country=country_tag,
                 sort=plan["sort"],
+                diet=plan["diet"],
             )
             items = [format_product(product) for product in data.get("hits", [])]
             shown, fitting = assistant.rank(
@@ -324,6 +334,7 @@ def assist():
             "kind": plan["kind"],
             "searchTerms": plan["search_terms"],
             "filters": plan["filters"],
+            "diet": plan["diet"],
         },
     })
 
