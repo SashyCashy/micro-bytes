@@ -9,7 +9,9 @@ SEARCH_URL = "https://search.openfoodfacts.org"
 
 # Open Food Facts asks every client to identify itself in the User-Agent so they
 # can contact operators about misbehaving traffic. There is no API key.
-HEADERS = {"User-Agent": "food-search/1.0 (https://github.com/food-search)"}
+HEADERS = {
+    "User-Agent": "micro-bytes/1.0 (https://github.com/SashyCashy/micro-bytes)"
+}
 
 TIMEOUT = 10
 
