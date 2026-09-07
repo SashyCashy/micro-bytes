@@ -1,15 +1,21 @@
 import os
 
+from dotenv import load_dotenv
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import requests
 from mealdb import search_meals, get_meal, extract_ingredients
+import assistant
 from openfoodfacts import (
     search_products,
     get_product_details,
     get_search_nutriscore_grade,
 )
 from openfoodfacts.client import COUNTRIES, DEFAULT_COUNTRY, MAX_RESULTS, SORT_FIELDS
+
+# Reads backend/.env for local runs; on a host the real environment wins,
+# since load_dotenv does not overwrite variables that are already set.
+load_dotenv()
 
 app = Flask(__name__)
 
@@ -246,6 +252,121 @@ def fetch_product_details(product_code):
     }
 
     return json_response(formatted_data)
+
+
+# A wider sample than a UI page: the assistant filters on nutrition the search
+# index cannot query, so it needs room to find matches within what it fetched.
+ASSIST_SAMPLE_SIZE = 24
+
+# Enough to fill the results grid without the model padding the list.
+ASSIST_MAX_RESULTS = 9
+
+
+def compact_for_model(item):
+    """Only the fields the model reasons over.
+
+    Images and URLs are dead weight in a prompt, and the full record would
+    triple the token cost of every search round.
+    """
+    return {
+        "id": item["id"],
+        "title": item["title"],
+        "brand": item.get("brand"),
+        "quantity": item.get("quantity"),
+        "nutriScore": item.get("nutriScore"),
+        "nutrition": item.get("nutrition"),
+    }
+
+
+@app.route("/api/assist", methods=["POST"])
+def assist():
+    """Natural-language search: the model searches, then filters the results."""
+    payload = request.get_json(silent=True) or {}
+    query = (payload.get("query") or "").strip()
+
+    if not query:
+        return jsonify({"error": "Ask a question to search for."}), 400
+
+    if not assistant.is_configured():
+        return jsonify({
+            "error": "AI search is not configured on this server.",
+            "reason": "assistant_unconfigured",
+        }), 503
+
+    # Everything the model was shown, so ids it picks resolve back to the full
+    # records the frontend renders. It never sees an id it was not given.
+    seen = {}
+
+    def search_products_tool(query, sort=None, country=None):
+        country_tag = DEFAULT_COUNTRY if country is None else country
+        # "all" is the model's way of clearing the filter; the client treats an
+        # unknown tag as no filter, so an empty string is the right handoff.
+        if country_tag == "all":
+            country_tag = ""
+
+        data = search_products(
+            query=query,
+            page=1,
+            page_size=ASSIST_SAMPLE_SIZE,
+            country=country_tag,
+            sort=sort if sort in SORT_FIELDS else None,
+        )
+        items = [format_product(product) for product in data.get("hits", [])]
+
+        for item in items:
+            seen[item["id"]] = {"kind": "product", "item": item}
+
+        return {
+            "sample_size": len(items),
+            "total_matches": min(data.get("count", 0), MAX_RESULTS),
+            "results": [compact_for_model(item) for item in items],
+        }
+
+    def search_recipes_tool(query):
+        meals = search_meals(query)[:ASSIST_SAMPLE_SIZE]
+        items = [format_meal_summary(meal) for meal in meals]
+
+        for item in items:
+            seen[item["id"]] = {"kind": "recipe", "item": item}
+
+        return {
+            "sample_size": len(items),
+            "total_matches": len(items),
+            "results": [
+                {"id": item["id"], "title": item["title"]} for item in items
+            ],
+        }
+
+    try:
+        result = assistant.run(
+            query,
+            {
+                "search_products": search_products_tool,
+                "search_recipes": search_recipes_tool,
+            },
+        )
+    except requests.RequestException as error:
+        return upstream_error("Search", error)
+    except assistant.AssistantError as error:
+        app.logger.warning("Assistant gave up: %s", error)
+        return jsonify({"error": str(error)}), 502
+    except Exception as error:
+        # The provider SDK raises its own exception types; the message can
+        # carry the request URL, so only the type is logged.
+        app.logger.warning("Assistant failed: %s", type(error).__name__)
+        return jsonify({"error": "AI search is unavailable right now"}), 502
+
+    # Ids are filtered through `seen` rather than trusted: a hallucinated id
+    # is dropped instead of 404ing the frontend.
+    chosen = [seen[item_id] for item_id in result["ids"] if item_id in seen]
+
+    return json_response({
+        "answer": result["answer"],
+        "results": [
+            {**entry["item"], "kind": entry["kind"]}
+            for entry in chosen[:ASSIST_MAX_RESULTS]
+        ],
+    })
 
 
 if __name__ == "__main__":
