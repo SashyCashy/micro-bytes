@@ -260,6 +260,7 @@ export default function RecipeSearchPage() {
         compact={isSearchActive}
         onAssist={runAssist}
         assistPending={isAssisting}
+        assistActive={Boolean(assistResults)}
       />
       {isSearchActive && (
         <SegmentedControl

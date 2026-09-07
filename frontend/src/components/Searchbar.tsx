@@ -19,6 +19,8 @@ type SearchBarProps = {
    *  per call, so it never rides the debounce that keyword search uses. */
   onAssist?: (query: string) => void;
   assistPending?: boolean;
+  /** Whether an assistant answer is currently on screen. */
+  assistActive?: boolean;
 };
 
 // Height of the bar alone, used as the collapsed target for the shell. It has
@@ -32,6 +34,7 @@ export default function SearchBar({
   compact = false,
   onAssist,
   assistPending = false,
+  assistActive = false,
 }: SearchBarProps) {
   // Everything below stays mounted across the compact toggle: React keeps the
   // same DOM nodes, so the CSS transitions actually have a previous value to
@@ -118,18 +121,27 @@ export default function SearchBar({
             <Group gap={2} wrap="nowrap" pr={4} justify="flex-end" w="100%">
               <Tooltip
                 label={
-                  canAssist
-                    ? 'Ask AI about this (Enter)'
-                    : 'Type a question, then ask AI'
+                  assistActive
+                    ? 'AI results are showing'
+                    : canAssist
+                      ? 'Ask AI about this (Enter)'
+                      : 'Type a question, then ask AI'
                 }
                 openDelay={300}
               >
                 <ActionIcon
-                  className={assistPending ? undefined : 'assist-star'}
-                  variant="subtle"
-                  color="brand"
+                  // The twinkle is an invitation, so it stops once the offer
+                  // has been taken up.
+                  className={
+                    assistPending || assistActive ? undefined : 'assist-star'
+                  }
+                  variant={assistActive ? 'light' : 'subtle'}
+                  // Brand orange marks AI as on; otherwise it sits in the
+                  // field at text weight, like the clear button beside it.
+                  color={assistActive ? 'brand' : 'gray'}
                   size="lg"
                   aria-label="Search with AI"
+                  aria-pressed={assistActive}
                   loading={assistPending}
                   onClick={runAssist}
                 >
