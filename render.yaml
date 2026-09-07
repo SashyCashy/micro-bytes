@@ -30,12 +30,14 @@ services:
     routes:
       # Replaces the nginx /api proxy block, which relies on a compose network
       # that does not exist here.
-      # The destination is the bare host: Render forwards the matched request
-      # path onto it. Appending "/api/:splat" here instead sent a path Flask
-      # had no route for, and every API call came back as an HTML 404.
+      # Render's placeholder is `*`, not Netlify's `:splat`, and it replaces
+      # only the part the source wildcard matched. Both a `:splat` destination
+      # (passed through literally) and a bare host (which dropped the /api
+      # prefix) reached gunicorn with a path Flask had no route for, so every
+      # API call came back as an HTML 404.
       - type: rewrite
         source: /api/*
-        destination: https://micro-bytes-api.onrender.com
+        destination: https://micro-bytes-api.onrender.com/api/*
       # Replaces nginx try_files: client routes like /products/<code> have no
       # file behind them and would 404 on refresh.
       - type: rewrite
