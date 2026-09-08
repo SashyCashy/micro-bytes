@@ -113,6 +113,13 @@ export default function RecipeSearchPage() {
   // a key the page is not reading yet, and the result appears 400ms late when
   // the debounce catches up.
   const runAssist = (value: string) => {
+    // Second press leaves AI mode. With the tab gone this is the way out,
+    // alongside the answer's own close button.
+    if (showAssist) {
+      setShowAssist(false);
+      return;
+    }
+
     setSearchParams(
       (previous) => {
         const next = new URLSearchParams(previous);
@@ -245,14 +252,6 @@ export default function RecipeSearchPage() {
   const setSearchType = (value: string) => {
     const next = new URLSearchParams(searchParams);
 
-    if (value === 'assist') {
-      next.set('ai', '1');
-      setSearchParams(next);
-      return;
-    }
-
-    next.delete('ai');
-
     if (value === 'recipe') {
       next.delete('type');
     } else {
@@ -291,7 +290,6 @@ export default function RecipeSearchPage() {
 
   // Held for the AI tab even while a keyword view is showing, so switching
   // back is instant and free.
-  const hasAssistAnswer = Boolean(assistData);
   const assistResults = showAssist ? assistData?.results : undefined;
   const isAssisting = assistant.isPending && showAssist;
   // The assistant answers across both types, so each result carries its own
@@ -314,23 +312,22 @@ export default function RecipeSearchPage() {
         compact={isSearchActive}
         onAssist={runAssist}
         assistPending={isAssisting}
-        assistActive={showAssist && hasAssistAnswer}
+        assistActive={showAssist}
       />
-      {isSearchActive && (
+      {isSearchActive && !showAssist && (
         <SegmentedControl
-          value={showAssist ? 'assist' : searchType}
+          value={searchType}
           onChange={setSearchType}
           data={[
             { label: 'Products', value: 'product' },
             { label: 'Recipes', value: 'recipe' },
-            { label: '✨ AI', value: 'assist' },
           ]}
           w="fit-content"
           mx="auto"
           aria-label="Search type"
         />
       )}
-      {isSearchActive && canSort && (
+      {isSearchActive && canSort && !showAssist && (
         <Group justify="flex-end" gap="sm" wrap="wrap">
           <Select
             value={countryValue}

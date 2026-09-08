@@ -122,7 +122,7 @@ export default function SearchBar({
               <Tooltip
                 label={
                   assistActive
-                    ? 'AI results are showing'
+                    ? 'Turn off AI search'
                     : canAssist
                       ? 'Ask AI about this (Enter)'
                       : 'Type a question, then ask AI'
@@ -140,7 +140,9 @@ export default function SearchBar({
                   // field at text weight, like the clear button beside it.
                   color={assistActive ? 'brand' : 'gray'}
                   size="lg"
-                  aria-label="Search with AI"
+                  aria-label={
+                    assistActive ? 'Turn off AI search' : 'Search with AI'
+                  }
                   aria-pressed={assistActive}
                   loading={assistPending}
                   onClick={runAssist}
