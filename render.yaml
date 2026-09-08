@@ -18,6 +18,11 @@ services:
       # that no browser would ever match, so the origin is named outright.
       - key: CORS_ORIGINS
         value: https://micro-bytes.onrender.com
+      # Enables POST /api/assist. `sync: false` means Render asks for the
+      # value in the dashboard instead of reading it from this file, so the
+      # key never lands in the repository.
+      - key: OPENAI_API_KEY
+        sync: false
 
   - type: web
     name: micro-bytes
