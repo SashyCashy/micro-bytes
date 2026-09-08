@@ -233,7 +233,7 @@ def plan(query):
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": query},
         ],
-        tools=PLAN_TOOL,
+        tools=PLAN_TOOL, # type: ignore
         # The plan is the only acceptable reply, and the same question must
         # always produce the same one.
         tool_choice={"type": "function", "function": {"name": "plan_search"}},
